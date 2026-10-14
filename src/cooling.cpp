@@ -45,18 +45,18 @@ Resfriamento lerResfriamento(
             return info.resfriamento;
     
     throw std::invalid_argument(
-        "resfriamento desconhecido '" + nome_ou_numero + "\n"
-        "Use o número ou o nome do resfriamento: \n" + 
-        "\t1 - linear\n" + 
-        "\t2 - geometrico\n" +
-        "\t3 - inversa\n" +
-        "\t4 - potencia\n" +
-        "\t5 - sigmoide\n" +
-        "\t6 - cosseno\n" +
-        "\t7 - tanh\n" +
-        "\t8 - cosh\n" +
-        "\t9 - exponencial\n" +
-        "\t10 - gaussiana\n"
+        "resfriamento desconhecido '" + nome_ou_numero + "'\n"
+        "Use o número ou o nome do resfriamento: \n"
+        "\t0 - linear\n"
+        "\t1 - geometrico\n"
+        "\t2 - inversa\n"
+        "\t3 - potencia\n"
+        "\t4 - sigmoide\n"
+        "\t5 - cosseno\n"
+        "\t6 - tanh\n"
+        "\t7 - cosh\n"
+        "\t8 - exponencial\n"
+        "\t9 - gaussiana\n"
     );
 }
 

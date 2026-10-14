@@ -21,8 +21,8 @@ enum class Resfriamento {
 
 /*
     Aceita o numero do docs/FormulasDeResfriamento_SA.pdf (0 a 9) ou o nome 
-    usado na linha de comando: linear, geometric, inverse, power, sigmoid, cosine,
-    tanh, cosh, exponential, gaussian.
+    usado na linha de comando: linear, geometrico, inversa, potencia, sigmoide,
+    cosseno, tanh, cosh, exponencial, gaussiana.
 */
 Resfriamento lerResfriamento(const std::string &nomeOuNumero);
 

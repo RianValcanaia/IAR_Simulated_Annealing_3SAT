@@ -1,7 +1,9 @@
 #include "utils.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <set>
 #include <stdexcept>
 
@@ -13,25 +15,27 @@ namespace util{
         std::cerr <<
             "uso: " << programa << " --in <arquivo.cnf> [opções]\n"
             << "  --in <.cnf>             instância DIMACS CNF (obrigatório)\n"
-            << "  --cooling <num>         número do resfriamento (default: 1)\n"
+            << "  --cooling <num|nome>    resfriamento 0-9 ou nome, ex. geometrico (default: 1)\n"
             << "  --t0 <num>              temperatura inicial (default: 1)\n"
             << "  --tn <num>              temperatura final (default: 0.001)\n"
             << "  --samax <num>           iterações por temperatura (default: 100)\n"
             << "  --seed <num>            semente do gerador (default: aleatória, sai no CSV)\n"
             << "  --max-evals <num>       número de avaliações (default: 200000)\n"
             << "  --bit-flip <num>        fração de bits invertidos por vizinho, entre [0, 1] (default: 0.05)\n"
-            << "  --nodes <num>           número de threads que serão utilizadas (default: 1)\n"
             << "  --format <csv|text>     formato da saída (default: csv)\n"
-            << "  --out  <path_arquivo>   arquivo de saída (default: results/)\n" 
-            << "  --trace <path_arquivo>  arquivo de trace (default: não gera)\n";
+            << "  --out  <path_arquivo>   arquivo de saída (default: csv em results/<instancia>_c<cooling>_t<t0>_sm<samax>_me<max-evals>.csv;\n"
+            << "                          text sai na tela)\n" 
+            << "  --trace <path_arquivo>  arquivo de trace (default: <saida sem .csv>_trace.csv; não gera se a saída é text na tela)\n"
+            << "  --trace-every <num>     grava uma linha do trace a cada <num> avaliações (default: 1)\n"
+            << "  --estimate-t0 <num>     não executa o SA: estima T0 com <num> amostras e imprime na tela\n";
     }
 
     std::map<std::string, std::string> lerArgumentos(int argc, char **argv) {
         const std::set<std::string> conhecidas = {
             "--in", "--seed", "--cooling",
             "--t0", "--tn", "--samax", "--max-evals",
-            "--bit-flip", "--nodes", "--format", "--out",
-            "--trace", "--estimate-t0"
+            "--bit-flip", "--format", "--out",
+            "--trace", "--trace-every", "--estimate-t0"
         };
         std::map<std::string, std::string> argumentos;
         for (int i = 1; i < argc; i += 2) {
@@ -61,6 +65,7 @@ namespace util{
     }
 
     void imprimirTexto(
+        std::ostream &saida,
         const std::string &instancia,
         const cnf::Formula &formula, 
         const sa::ParametrosSA &param, 
@@ -69,7 +74,7 @@ namespace util{
         long ms
     ) {
 
-        std::cout << "instância: " << instancia << endl
+        saida << "instância: " << instancia << endl
                   << "número de variáveis: " << formula.numVariaveis << endl
                   << "número de cláusulas: " << formula.numClausulas() << endl
                   << "cooling schedule: " << cool::getNumeroResfriamento(param.resfriamento) << endl
@@ -88,9 +93,19 @@ namespace util{
                   << "Solução final: " << endl;
         
         for (auto bit : resultado.melhorSolucao)
-            std::cout << static_cast<int>(bit) << " ";
+            saida << static_cast<int>(bit) << " ";
         
-        std::cout << endl;
+        saida << endl;
+    }
+
+    std::string caminhoCsvPadrao(const std::string &instancia, const sa::ParametrosSA &param) {
+        std::ostringstream nome;
+        nome << "results/" << std::filesystem::path(instancia).stem().string()
+             << "_c" << cool::getNumeroResfriamento(param.resfriamento)
+             << "_t" << param.T0
+             << "_sm" << param.SAmax
+             << "_me" << param.maxAvaliacoes << ".csv";
+        return nome.str();
     }
 
     std::string solucaoComoTexto(const cnf::Solucao &solucao) {

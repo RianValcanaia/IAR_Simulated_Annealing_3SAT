@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
         if (tem("--t0"))      param.T0 = std::stod(argumentos["--t0"]);
         if (tem("--tn"))      param.TN = std::stod(argumentos["--tn"]);
         if (tem("--samax"))   param.SAmax = static_cast<long>(std::stoll(argumentos["--samax"]));
+        if (tem("--trace-every")) param.tracoACada = static_cast<long>(std::stoll(argumentos["--trace-every"]));
         if (tem("--max-evals")) param.maxAvaliacoes = static_cast<long>(std::stoll(argumentos["--max-evals"]));
         
         double porcentagem = tem("--bit-flip") ? std::stod(argumentos["--bit-flip"]) : 0.05;
@@ -62,12 +64,30 @@ int main(int argc, char **argv) {
             return 0;
         }
 
-        // trace grava o historico para mostrar no plot
-        std::ofstream arquivoTraco;
+        // text vai para a tela; csv vai para arquivo. --out escolhe o arquivo em qualquer formato.
+        const bool formatoTexto = tem("--format") && argumentos["--format"] == "text";
+        const bool saidaEmArquivo = tem("--out") || !formatoTexto;
+        std::filesystem::path caminhoSaida;
+        if (saidaEmArquivo)
+            caminhoSaida = tem("--out") ? argumentos["--out"]
+                                        : util::caminhoCsvPadrao(argumentos["--in"], param);
+
+        // trace grava o historico para mostrar no plot; sem --trace, sai ao lado da saída: <saida>_trace.csv
+        std::filesystem::path caminhoTraco;
         if (tem("--trace")) {
-            arquivoTraco.open(argumentos["--trace"]);
-            if (!arquivoTraco) 
-                throw std::runtime_error("não foi possível criar '" + argumentos["--trace"] + "'");
+            caminhoTraco = argumentos["--trace"];
+        } else if (saidaEmArquivo) {
+            caminhoTraco = caminhoSaida;
+            caminhoTraco.replace_extension();
+            caminhoTraco += "_trace.csv";
+        }
+
+        std::ofstream arquivoTraco;
+        if (!caminhoTraco.empty()) {
+            if (caminhoTraco.has_parent_path()) std::filesystem::create_directories(caminhoTraco.parent_path());
+            arquivoTraco.open(caminhoTraco, std::ios::trunc);
+            if (!arquivoTraco)
+                throw std::runtime_error("não foi possível criar '" + caminhoTraco.string() + "'");
         }
 
         // ======= Resultado =======
@@ -77,7 +97,7 @@ int main(int argc, char **argv) {
         sa::ResultadoSA resultado = sa::executarSA(formula, 
                                                    param, 
                                                    gerador, 
-                                                   tem("--trace") ? &arquivoTraco : nullptr);
+                                                   arquivoTraco.is_open() ? &arquivoTraco : nullptr);
 
         double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - inicio).count();
 
@@ -85,8 +105,19 @@ int main(int argc, char **argv) {
         if (sa::clausulasNaoSatisfeitas(formula, resultado.melhorSolucao) != resultado.foMelhor)
             throw std::logic_error("f(s*) reportada não confere com a solução s*");
 
-        if (tem("--format") && argumentos["--format"] == "text") {
-            util::imprimirTexto(argumentos["--in"], 
+        std::ofstream arquivoSaida;
+        std::ostream *saida = &std::cout;
+        if (saidaEmArquivo) {
+            if (caminhoSaida.has_parent_path()) std::filesystem::create_directories(caminhoSaida.parent_path());
+            arquivoSaida.open(caminhoSaida, std::ios::trunc);  // sobrescreve se já existir
+            if (!arquivoSaida)
+                throw std::runtime_error("não foi possível criar '" + caminhoSaida.string() + "'");
+            saida = &arquivoSaida;
+        }
+
+        if (formatoTexto) {
+            util::imprimirTexto(*saida,
+                                argumentos["--in"], 
                                 formula, 
                                 param, 
                                 seed,
@@ -96,7 +127,7 @@ int main(int argc, char **argv) {
         }
 
         // saida em csv adicionar futuramente
-        std::cout << std::setprecision(10)
+        *saida << std::setprecision(10)
                   << "instancia,n_variaveis,"
                      "n_clausulas,cooling_num,"
                      "t0,tn,"

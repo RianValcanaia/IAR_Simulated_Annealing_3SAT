@@ -24,6 +24,9 @@ void validarParametros(
     if (param.maxAvaliacoes < 1) 
         throw std::invalid_argument("--max-evals deve ser >= 1");
 
+    if (param.tracoACada < 1)
+        throw std::invalid_argument("--trace-every deve ser >= 1");
+
     if (param.bitsPorVizinho < 1 || param.bitsPorVizinho > formula.numVariaveis)
         throw std::invalid_argument("bitsPorVizinho deve estar em [1, " + std::to_string(formula.numVariaveis) + "]");
 
@@ -187,7 +190,7 @@ EstimativaT0 estimarT0(
                 ++aceitos;
             }
         }
-        double taxa = double(aceitos) / amostras;
+        double taxa = static_cast<double>(aceitos) / static_cast<double>(amostras);
         if (taxa >= taxaAlvo) {
             estimativa.t0Simulado = T;
             estimativa.taxaAceitacao = taxa;
