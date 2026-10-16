@@ -65,7 +65,7 @@ struct Config {
     std::string pastaResultados = "results";
 
     double t0DaInstancia(const std::string &nome) const {
-        static const std::map<std::string, double> t0 = {{"uf20-01", 15}, {"uf100-01", 14}, {"uf250-01", 14}};
+        static const std::map<std::string, double> t0 = {{"uf20-01", 15}, {"uf100-01", 15}, {"uf250-01", 15}};
         auto it = t0.find(nome);
         if (it == t0.end()) throw std::invalid_argument("instância sem T0 definido: " + nome);
         return it->second;

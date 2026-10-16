@@ -30,7 +30,7 @@ BITFLIP=0.05
 PONTOS_TRACE=1000   # cada trace fica com ~1000 pontos
 EXECUCOES=10
 
-declare -A T0_DA_INSTANCIA=( [uf20-01]=15 [uf100-01]=35 [uf250-01]=50 )
+declare -A T0_DA_INSTANCIA=( [uf20-01]=15 [uf100-01]=15 [uf250-01]=15 )
 
 threads=10
 instancias=()
