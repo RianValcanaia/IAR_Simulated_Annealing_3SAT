@@ -1,7 +1,7 @@
 /*
     Campanha de experimentos em paralelo com MPI (mestre e operários).
 
-    Para cada instância, resfriamento e SAmax, sobe o max-evals (10^4 ... 10^8) e
+    Para cada instância, resfriamento e SAmax, sobe o max-evals (10^3 ... 10^8) e
     PARA de subir quando as 10 execuções do nível chegam a 0 cláusulas não
     satisfeitas (f_melhor = 0). É a mesma campanha de scripts/run_experiments2.sh, que roda só nesta máquina.
 
@@ -55,7 +55,7 @@ struct Config {
     std::vector<std::string> instancias = {"uf20-01", "uf100-01", "uf250-01"};
     std::vector<int> coolings = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<int> samaxes = {1, 100};
-    std::vector<long> maxiters = {10000, 100000, 1000000, 10000000, 100000000};
+    std::vector<long> maxiters = {1000, 10000, 100000, 1000000, 10000000, 100000000};
     double tn = 0.1;
     double bitFlip = 0.05;
     int execucoes = 10;
@@ -93,7 +93,7 @@ void mostrarUso() {
         "  --instances <a,b,..>   default: uf20-01,uf100-01,uf250-01\n"
         "  --coolings <0,1,..>    default: 0 a 9\n"
         "  --samaxes <1,100>      default: 1,100\n"
-        "  --maxiters <n,..>      default: 10^4 a 10^8\n"
+        "  --maxiters <n,..>      default: 10^3 a 10^8\n"
         "  --tn <num>             default: 0.1\n"
         "  --bit-flip <num>       default: 0.05\n"
         "  --execucoes <num>      execuções por configuração (default: 10)\n"

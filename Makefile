@@ -12,7 +12,7 @@ build:
 mpi:
 	@echo "Building the MPI campaign..."
 	mkdir -p bin
-	mpicxx -Wall -std=c++17 -O2 -Wextra -Isrc -o bin/sa3sat_mpi src/sa3sat_mpi.cpp $(LIB)
+	mpicxx -Wall -std=c++17 -O2 -Wextra -DOMPI_SKIP_MPICXX -DMPICH_SKIP_MPICXX -Isrc -o bin/sa3sat_mpi src/sa3sat_mpi.cpp $(LIB)
 
 clean:
 	@echo "Cleaning up..."
