@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # para cada instância, resfriamento e SAmax, sobe o
-# max-evals (10^3, 10^4, ... 10^8) e para de subir quando as 10 execuções
+# max-evals (10^3, 10^4, ... 10^7) e para de subir quando as 10 execuções
 # chegam a 0 cláusulas não satisfeitas (f_melhor = 0).
 #
 # uso: scripts/run_experiments2.sh [--threads N] [instancia ...]
@@ -24,7 +24,7 @@ EXPERIMENTOS="$RAIZ/scripts/run_experiments.sh"
 
 COOLINGS="${COOLINGS:-0 1 2 3 4 5 6 7 8 9}"
 SAMAXES="${SAMAXES:-1 100}"
-MAXITERS="${MAXITERS:-1000 10000 100000 1000000 10000000 100000000}"
+MAXITERS="${MAXITERS:-1000 10000 100000 1000000 10000000}"
 TN=0.1
 BITFLIP=0.05
 PONTOS_TRACE=1000   # cada trace fica com ~1000 pontos

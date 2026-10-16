@@ -1,13 +1,13 @@
 /*
     Campanha de experimentos em paralelo com MPI (mestre e operários).
 
-    Para cada instância, resfriamento e SAmax, sobe o max-evals (10^3 ... 10^8) e
-    PARA de subir quando as 10 execuções do nível chegam a 0 cláusulas não
-    satisfeitas (f_melhor = 0). É a mesma campanha de scripts/run_experiments2.sh, que roda só nesta máquina.
+    Para cada instância, resfriamento e SAmax, sobe o max-evals (10^3 ... 10^7) para toda a
+    instância de uma vez e PARA assim que algum resfriamento chega a 10/10 (as 10
+    execuções com 0 cláusulas não satisfeitas) num nível. As instâncias rodam uma por vez, na ordem da lista (as mais pesadas primeiro).
 
     - Mestre (rank 0): guarda a fila de tarefas (uma tarefa = uma execução do SA),
-      entrega uma a cada operário livre, grava os arquivos e decide o próximo nível
-      de cada cadeia quando as 10 execuções do nível terminam.
+      entrega uma a cada operário livre, grava os arquivos e decide, quando todas as
+      configurações de uma instância terminam um nível, se ela para ou sobe o próximo.
     - Operários (rank 1..N-1): rodam o SA no próprio processo e devolvem o CSV e o
       trace prontos. Os arquivos saem no mesmo layout de run_experiments.sh:
           results/<instancia>_c<cooling>_t<t0>_sm<samax>_me<max-evals>/
@@ -52,19 +52,20 @@ enum Tag { TAG_TAREFA = 1, TAG_RESULTADO = 2, TAG_FIM = 3 };
 // Configuração (todos os ranks leem os mesmos argumentos, então ficam iguais)
 // ----------------------------------------------------------------------------
 struct Config {
-    std::vector<std::string> instancias = {"uf20-01", "uf100-01", "uf250-01"};
+    std::vector<std::string> instancias = {"uf250-01", "uf100-01", "uf20-01"};   // as mais pesadas primeiro
     std::vector<int> coolings = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<int> samaxes = {1, 100};
-    std::vector<long> maxiters = {1000, 10000, 100000, 1000000, 10000000, 100000000};
+    std::vector<long> maxiters = {1000, 10000, 100000, 1000000, 10000000};
     double tn = 0.1;
-    double bitFlip = 0.05;
+    double bitFlip = 0.0;      // fração de bits; 0 = o mínimo, 1 bit por vizinho
     int execucoes = 10;
     int pontosTrace = 1000;  // cada trace fica com ~1000 pontos
+    bool instanciasJuntas = false;   // false: uma instância por vez, na ordem da lista
     std::string pastaExemplos = "exemples";
     std::string pastaResultados = "results";
 
     double t0DaInstancia(const std::string &nome) const {
-        static const std::map<std::string, double> t0 = {{"uf20-01", 15}, {"uf100-01", 35}, {"uf250-01", 50}};
+        static const std::map<std::string, double> t0 = {{"uf20-01", 15}, {"uf100-01", 14}, {"uf250-01", 14}};
         auto it = t0.find(nome);
         if (it == t0.end()) throw std::invalid_argument("instância sem T0 definido: " + nome);
         return it->second;
@@ -90,14 +91,15 @@ std::vector<T> lerLista(const std::string &texto) {
 void mostrarUso() {
     std::cerr <<
         "uso: mpirun -np <N> sa3sat_mpi [opções]   (N >= 2: 1 mestre + operários)\n"
-        "  --instances <a,b,..>   default: uf20-01,uf100-01,uf250-01\n"
+        "  --instances <a,b,..>   default: uf250-01,uf100-01,uf20-01 (a ordem é a prioridade)\n"
         "  --coolings <0,1,..>    default: 0 a 9\n"
         "  --samaxes <1,100>      default: 1,100\n"
-        "  --maxiters <n,..>      default: 10^3 a 10^8\n"
+        "  --maxiters <n,..>      default: 10^3 a 10^7\n"
         "  --tn <num>             default: 0.1\n"
-        "  --bit-flip <num>       default: 0.05\n"
+        "  --bit-flip <num>       fração de bits por vizinho; 0 = 1 bit (default: 0)\n"
         "  --execucoes <num>      execuções por configuração (default: 10)\n"
         "  --trace-points <num>   pontos por trace (default: 1000)\n"
+        "  --juntas               roda todas as instâncias ao mesmo tempo (default: uma por vez, na ordem)\n"
         "  --exemples <pasta>     pasta dos .cnf (default: exemples)\n"
         "  --results <pasta>      pasta de saída (default: results)\n";
 }
@@ -107,6 +109,7 @@ Config lerConfig(int argc, char **argv) {
     for (int i = 1; i < argc; i += 2) {
         const std::string chave = argv[i];
         if (chave == "-h" || chave == "--help") { mostrarUso(); std::exit(0); }
+        if (chave == "--juntas") { cfg.instanciasJuntas = true; --i; continue; }
         if (i + 1 >= argc) throw std::invalid_argument("faltou o valor de '" + chave + "'");
         const std::string valor = argv[i + 1];
         if (chave == "--instances") cfg.instancias = lerLista<std::string>(valor);
@@ -176,16 +179,28 @@ void gravarArquivo(const fs::path &caminho, const char *dados, std::size_t taman
     fs::rename(temporario, caminho);
 }
 
-// f_melhor (coluna 13) de um CSV já gravado; -1 se o arquivo não está legível
-int lerFMelhor(const fs::path &caminho) {
+// Campos de um CSV de resultado já gravado. fMelhor = -1 se o arquivo não está legível.
+struct CsvExistente {
+    int fMelhor = -1;
+    int bits = 0;     // coluna 9
+    double t0 = 0;    // coluna 5
+};
+
+CsvExistente lerCsvExistente(const fs::path &caminho) {
+    CsvExistente r;
     std::ifstream entrada(caminho);
     std::string linha;
-    if (!std::getline(entrada, linha) || !std::getline(entrada, linha)) return -1;
+    if (!std::getline(entrada, linha) || !std::getline(entrada, linha)) return r;
+    std::vector<std::string> campos;
     std::stringstream ss(linha);
-    std::string campo;
-    for (int k = 0; k < 13; ++k)
-        if (!std::getline(ss, campo, ',')) return -1;
-    try { return std::stoi(campo); } catch (...) { return -1; }
+    for (std::string campo; std::getline(ss, campo, ',');) campos.push_back(campo);
+    if (campos.size() < 17) return r;
+    try {
+        r.t0 = std::stod(campos[4]);
+        r.bits = std::stoi(campos[8]);
+        r.fMelhor = std::stoi(campos[12]);
+    } catch (...) { r.fMelhor = -1; }
+    return r;
 }
 
 // ----------------------------------------------------------------------------
@@ -256,26 +271,34 @@ uint64_t splitmix64(uint64_t x) {
     return x ^ (x >> 31);
 }
 
-// Uma cadeia = (instância, cooling, samax): sobe o max-evals até as execuções chegarem a 0.
+// Uma cadeia = (instância, cooling, samax). Em cada nível de max-evals ela roda `execucoes` execuções.
 struct Cadeia {
     int instancia, cooling, samax;
-    std::size_t nivel = 0;   // índice em cfg.maxiters
-    int pendentes = 0;       // execuções do nível ainda não terminadas
-    int sucessos = 0;        // execuções do nível com f_melhor = 0
+    int pendentes = 0;   // execuções do nível atual ainda não terminadas
+    int sucessos = 0;    // execuções do nível atual com f_melhor = 0
+};
+
+// Os níveis de max-evals andam juntos para todas as cadeias de uma instância: o nível só avança
+// quando todas terminaram, e a instância PARA assim que alguma cadeia chega a 10/10 num nível.
+struct EstadoInstancia {
+    std::size_t nivel = 0;
+    int pendentes = 0;       // execuções do nível atual (de todas as cadeias) ainda não terminadas
     bool concluida = false;
-    bool niveisDescontados = false;   // os níveis pulados já saíram do total
 };
 
 struct Mestre {
     const Config &cfg;
     std::vector<Cadeia> cadeias;
-    std::vector<std::string> resumo;           // linhas do resumo_campanha.csv
+    std::vector<EstadoInstancia> instancias;
+    std::vector<std::string> resumo;           // linhas do resumo_campanha.csv desta rodada
+    std::vector<std::string> resumoAnterior;   // linhas de instâncias que não fazem parte desta rodada
+    std::size_t proximaInstancia = 0;          // próxima instância a iniciar
     std::vector<int> ociosos;                  // ranks de operários livres
 
     struct ItemFila { Tarefa tarefa; int cadeia; };
-    struct MenorPrioridade {  // maior max-evals sai primeiro (as execuções longas começam cedo)
+    struct MenorPrioridade {  // instâncias na ordem da lista (as pesadas primeiro) e, dentro delas, a ordem de criação
         bool operator()(const ItemFila &a, const ItemFila &b) const {
-            if (a.tarefa.maxEvals != b.tarefa.maxEvals) return a.tarefa.maxEvals < b.tarefa.maxEvals;
+            if (a.tarefa.instancia != b.tarefa.instancia) return a.tarefa.instancia > b.tarefa.instancia;
             return a.tarefa.id > b.tarefa.id;
         }
     };
@@ -283,89 +306,153 @@ struct Mestre {
     std::unordered_map<int, ItemFila> emVoo;   // id da tarefa -> tarefa
     uint64_t sementeBase;
     int proximoId = 0;
-    // progresso: o total começa no máximo possível e diminui quando uma cadeia converge
-    // antes do último max-evals (os níveis que ela não precisou rodar saem da conta)
+    // progresso: o total começa no máximo possível e diminui quando uma instância para antes do
+    // último max-evals (os níveis que ela não precisou rodar saem da conta)
     long total = 0;
     long feitas = 0;
 
-    explicit Mestre(const Config &c) : cfg(c) {
+    explicit Mestre(const Config &c) : cfg(c), instancias(c.instancias.size()) {
         sementeBase = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
         for (std::size_t i = 0; i < cfg.instancias.size(); ++i)
             for (int cooling : cfg.coolings)
                 for (int samax : cfg.samaxes) cadeias.push_back({static_cast<int>(i), cooling, samax});
         total = static_cast<long>(cadeias.size()) * static_cast<long>(cfg.maxiters.size()) * cfg.execucoes;
+        carregarResumoAnterior();
     }
 
-    // a cadeia convergiu no nível atual: os níveis seguintes não serão rodados
-    void descontarNiveisPulados(Cadeia &c) {
-        if (c.niveisDescontados) return;
-        c.niveisDescontados = true;
-        const long pulados = static_cast<long>(cfg.maxiters.size() - 1 - c.nivel) * cfg.execucoes;
-        total -= pulados;
-        if (pulados > 0)
-            std::cout << "[mestre] " << cfg.instancias[c.instancia] << " cooling=" << c.cooling << " samax=" << c.samax
-                      << " convergiu em max-evals=" << cfg.maxiters[c.nivel] << ": " << pulados
-                      << " execuções dos níveis seguintes não serão rodadas (total " << total + pulados << " -> "
-                      << total << ")" << std::endl;
+    // mantém no resumo as linhas de instâncias que não estão nesta rodada (rodadas separadas por --instances)
+    void carregarResumoAnterior() {
+        std::ifstream entrada(fs::path(cfg.pastaResultados) / "resumo_campanha.csv");
+        std::string linha;
+        std::getline(entrada, linha);   // cabeçalho
+        while (std::getline(entrada, linha)) {
+            const std::string nome = linha.substr(0, linha.find(','));
+            if (!nome.empty() && std::find(cfg.instancias.begin(), cfg.instancias.end(), nome) == cfg.instancias.end())
+                resumoAnterior.push_back(linha);
+        }
     }
 
-    long maxEvalsDoNivel(const Cadeia &c) const { return cfg.maxiters[c.nivel]; }
+    // bits por vizinho esperados em cada instância (para validar resultados já gravados)
+    int bitsEsperados(int instancia) const {
+        const cnf::Formula f = cnf::lerArquivoDimacs(cfg.pastaExemplos + "/" + cfg.instancias[instancia] + ".cnf");
+        return sa::bitsPorPorcentagem(f.numVariaveis, cfg.bitFlip);
+    }
+
+    long maxEvalsDoNivel(int instancia) const { return cfg.maxiters[instancias[instancia].nivel]; }
 
     fs::path pastaDaCadeia(const Cadeia &c) const {
-        return pastaDaConfiguracao(cfg, cfg.instancias[c.instancia], c.cooling, c.samax, maxEvalsDoNivel(c));
+        return pastaDaConfiguracao(cfg, cfg.instancias[c.instancia], c.cooling, c.samax, maxEvalsDoNivel(c.instancia));
     }
+
+    int cadeiasPorInstancia() const { return static_cast<int>(cfg.coolings.size() * cfg.samaxes.size()); }
 
     void gravarResumo() const {
         std::ostringstream ss;
         ss << "instancia,cooling,samax,max_evals,sucessos,execucoes\n";
+        for (const auto &linha : resumoAnterior) ss << linha << '\n';
         for (const auto &linha : resumo) ss << linha << '\n';
         fs::create_directories(cfg.pastaResultados);
         gravarArquivo(fs::path(cfg.pastaResultados) / "resumo_campanha.csv", ss.str().data(), ss.str().size());
     }
 
-    // Encerra o nível atual da cadeia. Devolve true se ela deve seguir para o próximo nível.
-    bool fecharNivel(Cadeia &c) {
+    // Todas as execuções de uma cadeia no nível atual terminaram.
+    void fecharCadeia(const Cadeia &c) {
         const std::string &nome = cfg.instancias[c.instancia];
+        const long me = maxEvalsDoNivel(c.instancia);
         resumo.push_back(nome + "," + std::to_string(c.cooling) + "," + std::to_string(c.samax) + "," +
-                         std::to_string(maxEvalsDoNivel(c)) + "," + std::to_string(c.sucessos) + "," +
-                         std::to_string(cfg.execucoes));
+                         std::to_string(me) + "," + std::to_string(c.sucessos) + "," + std::to_string(cfg.execucoes));
         gravarResumo();
-        std::cout << "[mestre] " << nome << " cooling=" << c.cooling << " samax=" << c.samax
-                  << " max-evals=" << maxEvalsDoNivel(c) << ": " << c.sucessos << "/" << cfg.execucoes
-                  << " chegaram a 0" << std::endl;
-        if (c.sucessos == cfg.execucoes) { descontarNiveisPulados(c); c.concluida = true; return false; }
-        if (++c.nivel >= cfg.maxiters.size()) {
-            std::cout << "[mestre]   sem " << cfg.execucoes << "/" << cfg.execucoes << " até o último max-evals" << std::endl;
-            c.concluida = true;
+        std::cout << "[mestre] " << nome << " cooling=" << c.cooling << " samax=" << c.samax << " max-evals=" << me
+                  << ": " << c.sucessos << "/" << cfg.execucoes << " chegaram a 0" << std::endl;
+    }
+
+    int cadeiasConvergidas(int instancia) const {
+        int n = 0;
+        for (const Cadeia &c : cadeias)
+            if (c.instancia == instancia && c.sucessos == cfg.execucoes) ++n;
+        return n;
+    }
+
+    // A instância vai parar neste nível? (alguma cadeia chegou a 10/10, ou era o último nível)
+    bool instanciaParaAqui(int instancia) const {
+        return cadeiasConvergidas(instancia) > 0 || instancias[instancia].nivel + 1 >= cfg.maxiters.size();
+    }
+
+    // Tira do total os níveis que não serão rodados, quando a instância para antes do último.
+    void descontarNiveisPulados(int instancia) {
+        const EstadoInstancia &e = instancias[instancia];
+        const long pulados = static_cast<long>(cfg.maxiters.size() - 1 - e.nivel) * cadeiasPorInstancia() * cfg.execucoes;
+        if (pulados == 0) return;
+        total -= pulados;
+        std::cout << "[mestre] " << cfg.instancias[instancia] << ": " << cadeiasConvergidas(instancia)
+                  << " configuração(ões) chegaram a 10/10 em max-evals=" << cfg.maxiters[e.nivel] << ", "
+                  << "não sobe mais (" << pulados << " execuções saem da conta; total " << total + pulados
+                  << " -> " << total << ")" << std::endl;
+    }
+
+    // Encerra o nível atual da instância. Devolve true se ela segue para o próximo nível.
+    bool fecharNivel(int instancia) {
+        EstadoInstancia &e = instancias[instancia];
+        if (cadeiasConvergidas(instancia) > 0) { e.concluida = true; return false; }
+        if (++e.nivel >= cfg.maxiters.size()) {
+            std::cout << "[mestre] " << cfg.instancias[instancia] << ": nenhuma configuração chegou a "
+                      << cfg.execucoes << "/" << cfg.execucoes << " até max-evals=" << cfg.maxiters.back() << std::endl;
+            e.concluida = true;
             return false;
         }
         return true;
     }
 
-    // Inicia o nível atual: enfileira o que falta e conta o que já está em disco.
+    // Inicia o nível atual da instância: enfileira o que falta e conta o que já está em disco.
     // Se o nível inteiro já existia, fecha-o e segue para o próximo.
-    void avancar(int indice) {
-        Cadeia &c = cadeias[indice];
-        while (!c.concluida) {
-            c.pendentes = 0;
-            c.sucessos = 0;
-            const fs::path pasta = pastaDaCadeia(c);
-            for (int e = 1; e <= cfg.execucoes; ++e) {
-                const int fMelhor = (fs::exists(arquivoTrace(pasta, e)) && fs::exists(arquivoCsv(pasta, e)))
-                                        ? lerFMelhor(arquivoCsv(pasta, e)) : -1;
-                if (fMelhor >= 0) {
-                    if (fMelhor == 0) ++c.sucessos;
-                    ++feitas;   // já estava em disco (retomada)
-                    continue;
+    void avancar(int instancia) {
+        EstadoInstancia &e = instancias[instancia];
+        const int bits = bitsEsperados(instancia);
+        const double t0 = cfg.t0DaInstancia(cfg.instancias[instancia]);
+        while (!e.concluida) {
+            e.pendentes = 0;
+            for (std::size_t k = 0; k < cadeias.size(); ++k) {
+                Cadeia &c = cadeias[k];
+                if (c.instancia != instancia) continue;
+                c.pendentes = 0;
+                c.sucessos = 0;
+                const fs::path pasta = pastaDaCadeia(c);
+                for (int ex = 1; ex <= cfg.execucoes; ++ex) {
+                    CsvExistente existente;
+                    if (fs::exists(arquivoTrace(pasta, ex)) && fs::exists(arquivoCsv(pasta, ex)))
+                        existente = lerCsvExistente(arquivoCsv(pasta, ex));
+                    if (existente.fMelhor >= 0 && (existente.bits != bits || existente.t0 != t0))
+                        throw std::runtime_error(
+                            "resultado já gravado em '" + arquivoCsv(pasta, ex).string() + "' foi feito com " +
+                            std::to_string(existente.bits) + " bit(s) e T0=" + numeroParaTexto(existente.t0) +
+                            ", mas esta execução usa " + std::to_string(bits) + " bit(s) e T0=" +
+                            numeroParaTexto(t0) + ". Mova ou apague essa pasta de resultados antes de seguir.");
+                    if (existente.fMelhor >= 0) {
+                        if (existente.fMelhor == 0) ++c.sucessos;
+                        ++feitas;   // já estava em disco (retomada)
+                        continue;
+                    }
+                    Tarefa t{proximoId, c.instancia, c.cooling, c.samax, maxEvalsDoNivel(instancia), ex,
+                             splitmix64(sementeBase + static_cast<uint64_t>(proximoId))};
+                    ++proximoId;
+                    fila.push({t, static_cast<int>(k)});
+                    ++c.pendentes;
+                    ++e.pendentes;
                 }
-                Tarefa t{proximoId, c.instancia, c.cooling, c.samax, maxEvalsDoNivel(c), e,
-                         splitmix64(sementeBase + static_cast<uint64_t>(proximoId))};
-                ++proximoId;
-                fila.push({t, indice});
-                ++c.pendentes;
+                if (c.pendentes == 0) fecharCadeia(c);   // a cadeia inteira já estava em disco
             }
-            if (c.pendentes > 0) return;
-            if (!fecharNivel(c)) return;
+            if (e.pendentes > 0) return;
+            if (instanciaParaAqui(instancia)) descontarNiveisPulados(instancia);
+            if (!fecharNivel(instancia)) return;
+        }
+    }
+
+    // Inicia as instâncias que já podem começar: todas de uma vez (--juntas) ou só a próxima, quando a
+    // anterior terminou. Uma instância toda em disco conclui na hora, então o laço segue para a próxima.
+    void iniciarInstancias() {
+        while (proximaInstancia < cfg.instancias.size()) {
+            if (!cfg.instanciasJuntas && proximaInstancia > 0 && !instancias[proximaInstancia - 1].concluida) return;
+            avancar(static_cast<int>(proximaInstancia++));
         }
     }
 
@@ -402,13 +489,13 @@ struct Mestre {
                       << std::string(corpo, tamanhoCorpo) << std::endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-
         return finalizarTarefa(item, cab, corpo, tamanhoCorpo, status.MPI_SOURCE);
     }
 
     int finalizarTarefa(const ItemFila &item, const CabecalhoResultado &cab, const char *corpo,
                         std::size_t tamanhoCorpo, int operario) {
         Cadeia &c = cadeias[item.cadeia];
+        EstadoInstancia &e = instancias[item.tarefa.instancia];
         const fs::path pasta = pastaDaConfiguracao(cfg, cfg.instancias[item.tarefa.instancia], item.tarefa.cooling,
                                                    item.tarefa.samax, item.tarefa.maxEvals);
         fs::create_directories(pasta);
@@ -421,23 +508,30 @@ struct Mestre {
         gravarArquivo(arquivoCsv(pasta, item.tarefa.execucao), corpo, fimCsv);
 
         if (cab.fMelhor == 0) ++c.sucessos;
+        --c.pendentes;
+        --e.pendentes;
         ++feitas;
-        const bool nivelFechou = (c.pendentes == 1);   // esta era a última do nível
-        if (nivelFechou && c.sucessos == cfg.execucoes) descontarNiveisPulados(c);   // antes de imprimir
+
+        const bool nivelFechou = (e.pendentes == 0);
+        // se a instância para neste nível, os níveis seguintes saem do total antes de imprimir o progresso
+        if (nivelFechou && instanciaParaAqui(item.tarefa.instancia)) descontarNiveisPulados(item.tarefa.instancia);
         std::cout << feitas << "/" << total << " (faltam " << total - feitas << ")  " << cfg.instancias[item.tarefa.instancia]
                   << " cooling=" << item.tarefa.cooling << " samax=" << item.tarefa.samax
                   << " max-evals=" << item.tarefa.maxEvals << " execucao=" << item.tarefa.execucao
                   << " f_melhor=" << cab.fMelhor << std::endl;
-        if (--c.pendentes == 0 && fecharNivel(c)) avancar(item.cadeia);
+
+        if (c.pendentes == 0) fecharCadeia(c);
+        if (nivelFechou && fecharNivel(item.tarefa.instancia)) avancar(item.tarefa.instancia);
+        if (nivelFechou && e.concluida) iniciarInstancias();   // a próxima instância pode começar
         return operario;
     }
 
     void executar(int tamanhoMundo) {
         for (int rank = 1; rank < tamanhoMundo; ++rank) ociosos.push_back(rank);
-        std::cout << "[mestre] " << cadeias.size() << " cadeias, " << (tamanhoMundo - 1)
-                  << " operários, seed base " << sementeBase << std::endl;
+        std::cout << "[mestre] " << cfg.instancias.size() << " instância(s), " << cadeias.size() << " configurações, "
+                  << (tamanhoMundo - 1) << " operários, seed base " << sementeBase << std::endl;
 
-        for (std::size_t i = 0; i < cadeias.size(); ++i) avancar(static_cast<int>(i));
+        iniciarInstancias();
         if (feitas > 0) std::cout << "[mestre] retomando: " << feitas << " execuções já estavam em disco" << std::endl;
         despachar();
 
@@ -472,6 +566,8 @@ int main(int argc, char **argv) {
     } catch (const std::exception &erro) {
         if (rank == 0) std::cerr << "erro: " << erro.what() << "\n\n";
         if (rank == 0) mostrarUso();
+        std::cerr.flush();
+        MPI_Abort(MPI_COMM_WORLD, 1);   // o mestre parou: encerra os operários também
         status = 1;
     }
     MPI_Finalize();
