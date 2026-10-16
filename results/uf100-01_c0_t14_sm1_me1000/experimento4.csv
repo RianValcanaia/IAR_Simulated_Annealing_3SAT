@@ -1,0 +1,2 @@
+instancia,n_variaveis,n_clausulas,cooling_num,t0,tn,samax,max_aval,bit,seed,ciclos,f_inicial,f_melhor,f_final,avaliacoes_do_melhor,tempo_ms,solucao
+exemples/uf100-01.cnf,100,430,0,14,0.1,1,1000,1,7745816001707209650,999,58,21,21,998,2,0101100010011111001011100100110101110010010110001100010010010000100111101101000011111011101100010010

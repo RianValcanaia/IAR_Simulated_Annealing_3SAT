@@ -1,0 +1,5 @@
+ens1 slots=7
+ens2 slots=6
+ens3 slots=6
+ens4 slots=4
+ens5 slots=4
