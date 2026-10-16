@@ -3,7 +3,6 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <random>
@@ -126,26 +125,8 @@ int main(int argc, char **argv) {
             return 0;
         }
 
-        // saida em csv adicionar futuramente
-        *saida << std::setprecision(10)
-                  << "instancia,n_variaveis,"
-                     "n_clausulas,cooling_num,"
-                     "t0,tn,"
-                     "samax,max_aval,"
-                     "bit,seed,"
-                     "ciclos,f_inicial,"
-                     "f_melhor,f_final,"
-                     "avaliacoes_do_melhor,tempo_ms,"
-                     "solucao\n"
-                  << argumentos["--in"] << ',' << formula.numVariaveis << ','  
-                  << formula.numClausulas() << ',' << cool::getNumeroResfriamento(param.resfriamento) << ','
-                  << param.T0 << ',' << resultado.TN << ','
-                  << param.SAmax << ',' << param.maxAvaliacoes << ','
-                  << param.bitsPorVizinho << ',' << seed << ',' 
-                  << resultado.ciclos << ',' << resultado.foInicial << ',' 
-                  << resultado.foMelhor << ',' << resultado.foFinal << ','
-                  << resultado.avaliacaoDaMelhor << ',' << static_cast<long>(ms + 0.5) << ','
-                  << util::solucaoComoTexto(resultado.melhorSolucao) << '\n';
+        // saida em csv
+        util::escreverCsv(*saida, argumentos["--in"], formula, param, seed, resultado, static_cast<long>(ms + 0.5));
     } catch (const std::invalid_argument &erro) {
         std::cerr << "erro: " << erro.what() << "\n\n";
         util::mostrarUso(argv[0]);

@@ -21,6 +21,17 @@ namespace util {
         long ms
     );
 
+    // Cabeçalho + uma linha de resultado em CSV (o formato lido por plot.py e verify_solution.py).
+    void escreverCsv(
+        std::ostream &saida,
+        const std::string &instancia,
+        const cnf::Formula &formula,
+        const sa::ParametrosSA &param,
+        uint64_t seed,
+        const sa::ResultadoSA &resultado,
+        long ms
+    );
+
     std::map<std::string, std::string> lerArgumentos(int argc, char **argv);
 
     // results/<instancia sem extensão>_c<cooling>_t<t0>_sm<samax>_me<max-evals>.csv

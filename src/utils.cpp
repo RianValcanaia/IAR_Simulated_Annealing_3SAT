@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <set>
@@ -96,6 +97,36 @@ namespace util{
             saida << static_cast<int>(bit) << " ";
         
         saida << endl;
+    }
+
+    void escreverCsv(
+        std::ostream &saida,
+        const std::string &instancia,
+        const cnf::Formula &formula,
+        const sa::ParametrosSA &param,
+        uint64_t seed,
+        const sa::ResultadoSA &resultado,
+        long ms
+    ) {
+        saida << std::setprecision(10)
+              << "instancia,n_variaveis,"
+                 "n_clausulas,cooling_num,"
+                 "t0,tn,"
+                 "samax,max_aval,"
+                 "bit,seed,"
+                 "ciclos,f_inicial,"
+                 "f_melhor,f_final,"
+                 "avaliacoes_do_melhor,tempo_ms,"
+                 "solucao\n"
+              << instancia << ',' << formula.numVariaveis << ','
+              << formula.numClausulas() << ',' << cool::getNumeroResfriamento(param.resfriamento) << ','
+              << param.T0 << ',' << resultado.TN << ','
+              << param.SAmax << ',' << param.maxAvaliacoes << ','
+              << param.bitsPorVizinho << ',' << seed << ','
+              << resultado.ciclos << ',' << resultado.foInicial << ','
+              << resultado.foMelhor << ',' << resultado.foFinal << ','
+              << resultado.avaliacaoDaMelhor << ',' << ms << ','
+              << solucaoComoTexto(resultado.melhorSolucao) << '\n';
     }
 
     std::string caminhoCsvPadrao(const std::string &instancia, const sa::ParametrosSA &param) {
